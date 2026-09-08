@@ -2,15 +2,16 @@
 
 ## Build Instructions
 
-Use the top level `Makefile` to build this. It injects things in to the build
-so the container works correctly for your user under `podman`.
+Use the top level `Makefile` to build this. It builds the shared `agent-base`
+image first, then layers this tool on top.
 
 ```bash
 make openai-codex
 ```
 
 You can add more local tools to the container to be installed via `apt-get` by
-extending the `LOCAL_TOOLS` list in the top-level `Makefile`.
+extending the `LOCAL_TOOLS` list in `base/Dockerfile`, which is the single
+source of truth for the shared base image.
 
 ## First time setup
 

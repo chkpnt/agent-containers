@@ -3,13 +3,8 @@
 # Determine container engine (podman or docker)
 CONTAINER_ENGINE := $(shell which podman 2>/dev/null || which docker 2>/dev/null)
 
-# UID/GID
-HOST_UID := $(shell id -u)
-HOST_GID := $(shell id -g)
-
-# Tools to install in to the containers with apt-get
-LOCAL_TOOLS := "git curl jq ripgrep vim nano make zip unzip ssh-client wget tree imagemagick build-essential python3 python3-pip"
-
+# Note: the apt tool list lives in base/Dockerfile (LOCAL_TOOLS ARG), which is
+# the single source of truth. Add tools there, not here.
 
 # Ensure we have a container engine
 ifeq ($(CONTAINER_ENGINE),)
@@ -21,9 +16,6 @@ all: base claude-code openai-codex
 base:
 	@echo "Building base image"
 	$(CONTAINER_ENGINE) build \
-		--build-arg HOST_UID=$(HOST_UID) \
-		--build-arg HOST_GID=$(HOST_GID) \
-		--build-arg LOCAL_TOOLS=$(LOCAL_TOOLS) \
 		-t agent-base \
 		-f base/Dockerfile base
 

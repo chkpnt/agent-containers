@@ -1,10 +1,9 @@
 FROM node:26-slim
 
-ARG HOST_UID=1000
-ARG HOST_GID=1000
 ARG TARGETARCH
-# Combine all tools here. Note: added specific tools you listed for runtime
-ARG LOCAL_TOOLS="git curl jq ripgrep vim nano make zip unzip ssh-client wget tree imagemagick ca-certificates gnupg procps build-essential python3"
+# Single source of truth for apt-installed tooling. Override per-build with:
+#   docker build --build-arg LOCAL_TOOLS="..." -f base/Dockerfile base
+ARG LOCAL_TOOLS="git curl jq ripgrep vim nano make zip unzip ssh-client wget tree imagemagick ca-certificates gnupg procps build-essential python3 python3-pip redis-tools"
 
 # 1. Install System Dependencies (as root)
 RUN apt-get update && \

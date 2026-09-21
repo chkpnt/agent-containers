@@ -62,6 +62,14 @@ RUN mkdir -p /home/node/.npm-global && \
   mkdir -p /home/node/.local && \
   mkdir -p /home/node/.bun/bin
 
+# SSH dir must exist and be owned by 'node' before any key files are bind-mounted
+# into it; otherwise Docker creates it as root:root and ssh cannot write known_hosts.
+# Pre-seed GitHub's host keys so the first non-interactive git/ssh call succeeds.
+RUN mkdir -p /home/node/.ssh && \
+  chmod 700 /home/node/.ssh && \
+  ssh-keyscan -t ed25519,rsa,ecdsa github.com > /home/node/.ssh/known_hosts 2>/dev/null && \
+  chmod 600 /home/node/.ssh/known_hosts
+
 # 5. Install agent-browser (headless browser automation CLI for AI agents)
 # Downloads Chromium browser to user's cache
 RUN npm install -g agent-browser && \

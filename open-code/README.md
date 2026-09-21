@@ -39,6 +39,30 @@ exec docker run --rm --tty --interactive \
   open-code "$@"
 ```
 
+## GitHub access via a dedicated SSH key
+
+Give the agent its own deploy/user key rather than mounting your whole `~/.ssh`:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/ptaq-agent -C "opencode-agent"
+# add ~/.ssh/ptaq-agent.pub to GitHub, then mount only that key pair:
+  -v "$HOME/.ssh/ptaq-agent:/home/node/.ssh/id_ed25519:ro" \
+  -v "$HOME/.ssh/ptaq-agent.pub:/home/node/.ssh/id_ed25519.pub:ro" \
+  -v "$HOME/.config/gh:/home/node/.config/gh" \   # optional: gh CLI auth
+```
+
+The base image pre-creates `/home/node/.ssh` (owned by `node`, mode 700) with
+GitHub's host keys already in `known_hosts`. Without that, Docker would create
+the directory as `root:root` when mounting the key files and ssh would fail
+with `Failed to add the host to the list of known hosts`.
+
+Verify inside the container:
+
+```bash
+ssh -T git@github.com        # expect: Hi <user>! You've successfully authenticated...
+git fetch origin --dry-run
+```
+
 ## References
 
 * [Documentation](https://opencode.ai/docs)

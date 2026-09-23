@@ -78,11 +78,35 @@ RUN npm install -g agent-browser && \
 # Set executable path for runtime (only matters on ARM, harmless on x86 if unset)
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# 6. Bash Configuration
+# 6. Install gh CLI extensions
+# Installed by hand rather than via `gh extension install`, which is gated
+# behind `gh auth login` even for public repos (cli/cli#2680). Release assets
+# themselves are public, so a plain download works with no token at build time.
+# The manifest.yml mirrors what gh itself writes, so `gh extension list` and
+# `gh extension upgrade gh-stack` work at runtime.
+# Extensions are per-user: this must run as 'node'.
+RUN set -eux; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    case "$arch" in \
+      amd64|arm64) asset="linux-$arch" ;; \
+      *) echo "gh-stack: unsupported arch $arch" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/github/gh-stack/releases/latest/download/$asset"; \
+    tag="$(curl -fsS -o /dev/null -w '%{redirect_url}' "$url" | sed -n 's#.*/download/\([^/]*\)/.*#\1#p')"; \
+    test -n "$tag"; \
+    dir="/home/node/.local/share/gh/extensions/gh-stack"; \
+    mkdir -p "$dir"; \
+    curl -fsSL -o "$dir/gh-stack" "$url"; \
+    chmod +x "$dir/gh-stack"; \
+    printf 'owner: github\nname: gh-stack\nhost: github.com\ntag: %s\nispinned: false\npath: %s/gh-stack\n' \
+      "$tag" "$dir" > "$dir/manifest.yml"; \
+    "$dir/gh-stack" --help > /dev/null
+
+# 7. Bash Configuration
 # Add the path export to bashrc so interactive shells pick it up
 RUN echo "export PATH=${NPM_CONFIG_PREFIX}/bin:${BUN_INSTALL}/bin:\$PATH" >> /home/node/.bashrc
 
-# 7. Copy config files to the 'node' user's home
+# 8. Copy config files to the 'node' user's home
 COPY --chown=node:node ./.bash_aliases /home/node/.bash_aliases
 # Global pnpm config (see pnpm-config.yaml for rationale)
 COPY --chown=node:node ./pnpm-config.yaml /home/node/.config/pnpm/config.yaml

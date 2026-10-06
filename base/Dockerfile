@@ -25,6 +25,15 @@ COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
 # Create the bunx symlink (standard practice)
 RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
 
+# Install k6 (load testing) from the official image. It is a static Go binary
+# (CGO_ENABLED=0), so the Alpine-built binary runs fine on this Debian base.
+# Pinned: bump the tag deliberately (https://github.com/grafana/k6/releases).
+COPY --from=grafana/k6:2.3.0 /usr/bin/k6 /usr/local/bin/k6
+
+# Install uv / uvx (Python package & project manager) from the official image.
+# Pinned: bump the tag deliberately (https://github.com/astral-sh/uv/releases).
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /usr/local/bin/
+
 # Install Playwright system dependencies for Chromium (required by agent-browser)
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
       apt-get update && \
@@ -57,9 +66,17 @@ ENV PATH=$NPM_CONFIG_PREFIX/bin:$PATH
 ENV BUN_INSTALL=/home/node/.bun
 ENV PATH=$BUN_INSTALL/bin:$PATH
 
+# User-local executables: `uv tool install` targets, plus the stable chromium
+# symlink created below for k6.
+ENV PATH=/home/node/.local/bin:$PATH
+
+# uv: /app is a bind mount on a different filesystem than ~/.cache/uv, so
+# hardlinks fail; copy instead to avoid per-install warnings.
+ENV UV_LINK_MODE=copy
+
 RUN mkdir -p /home/node/.npm-global && \
   mkdir -p /home/node/.config && \
-  mkdir -p /home/node/.local && \
+  mkdir -p /home/node/.local/bin && \
   mkdir -p /home/node/.bun/bin
 
 # SSH dir must exist and be owned by 'node' before any key files are bind-mounted
@@ -77,6 +94,31 @@ RUN npm install -g agent-browser && \
 
 # Set executable path for runtime (only matters on ARM, harmless on x86 if unset)
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Point k6's browser module at the Chromium already in this image.
+# arm64: apt's /usr/bin/chromium. amd64: the Chrome for Testing build that
+# `agent-browser install` downloaded, flattened to
+# ~/.agent-browser/browsers/chrome-<version>/chrome (Playwright's
+# chrome-linux*/chrome layout is matched too, as a fallback).
+# Symlink whichever exists to a stable path so the ENV below never goes stale.
+RUN set -eux; \
+    if [ -x /usr/bin/chromium ]; then \
+      chrome=/usr/bin/chromium; \
+    else \
+      chrome="$(find /home/node/.agent-browser/browsers /home/node/.cache/ms-playwright \
+                  -type f -name chrome -path '*/chrome-*/chrome' 2>/dev/null \
+                | sort -V | tail -n 1)"; \
+    fi; \
+    if [ -z "$chrome" ]; then echo "k6: no Chromium found for K6_BROWSER_EXECUTABLE_PATH" >&2; exit 1; fi; \
+    ln -sf "$chrome" /home/node/.local/bin/chromium; \
+    /home/node/.local/bin/chromium --version
+ENV K6_BROWSER_EXECUTABLE_PATH=/home/node/.local/bin/chromium
+ENV K6_BROWSER_HEADLESS=true
+# Same as grafana/k6:with-browser: no-sandbox avoids needing SYS_ADMIN in the container
+ENV K6_BROWSER_ARGS=no-sandbox
+
+# Sanity-check the copied binaries
+RUN k6 version && uv --version && uvx --version
 
 # 6. Install gh CLI extensions
 # Installed by hand rather than via `gh extension install`, which is gated
@@ -104,7 +146,7 @@ RUN set -eux; \
 
 # 7. Bash Configuration
 # Add the path export to bashrc so interactive shells pick it up
-RUN echo "export PATH=${NPM_CONFIG_PREFIX}/bin:${BUN_INSTALL}/bin:\$PATH" >> /home/node/.bashrc
+RUN echo "export PATH=/home/node/.local/bin:${NPM_CONFIG_PREFIX}/bin:${BUN_INSTALL}/bin:\$PATH" >> /home/node/.bashrc
 
 # 8. Copy config files to the 'node' user's home
 COPY --chown=node:node ./.bash_aliases /home/node/.bash_aliases

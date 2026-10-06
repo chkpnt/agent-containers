@@ -46,6 +46,22 @@ Each Dockerfile uses multi-stage builds to:
 - Improve security by reducing the attack surface
 - Speed up builds through better layer caching
 
+### Bundled tooling
+
+`agent-base` (and therefore every agent image) includes, besides the apt
+packages listed in `base/Dockerfile`:
+
+- `gh` (+ `gh-stack` extension), `bun`/`bunx`, `corepack`, `agent-browser`
+- `k6` (pinned in `base/Dockerfile`). The browser module is preconfigured to
+  use the image's Chromium via `K6_BROWSER_EXECUTABLE_PATH`, headless, with
+  `no-sandbox`.
+- `uv`/`uvx` (pinned in `base/Dockerfile`). Uses the system `python3` or
+  downloads managed Pythons as needed; `uv tool install` puts binaries in
+  `~/.local/bin`, which is on `PATH`.
+
+To upgrade k6 or uv, bump the image tags in the `COPY --from=` lines and run
+`make all`.
+
 ### Build Options
 
 The build system supports caching control options:

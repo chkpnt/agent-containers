@@ -50,6 +50,19 @@ RUN npm install -g corepack && corepack enable
 
 # 2. Configure the existing 'node' user
 # The node image usually creates the node user. We ensure it owns the app dir.
+# Remap 'node' to the host user's UID/GID so bind-mounted host dirs
+# (~/.local/share/opencode, project dirs, ...) are writable inside the container.
+# Defaults keep the stock 1000:1000; the Makefile passes `id -u`/`id -g`.
+# Must run before `USER node` so all later layers are owned by the new UID.
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+RUN set -eux; \
+    test "$HOST_UID" != 0 || { echo "HOST_UID=0 not allowed (don't build with sudo)" >&2; exit 1; }; \
+    if [ "$(id -u node)" != "$HOST_UID" ] || [ "$(id -g node)" != "$HOST_GID" ]; then \
+      groupmod -o -g "$HOST_GID" node; \
+      usermod -o -u "$HOST_UID" -g "$HOST_GID" node; \
+      chown -R node:node /home/node; \
+    fi
 WORKDIR /app
 RUN chown -R node:node /app
 

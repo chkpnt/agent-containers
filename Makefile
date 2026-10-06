@@ -1,7 +1,12 @@
-.PHONY: all clean deep-clean base claude-code openai-codex
+.PHONY: all clean deep-clean base claude-code openai-codex open-code
 
 # Determine container engine (podman or docker)
 CONTAINER_ENGINE := $(shell which podman 2>/dev/null || which docker 2>/dev/null)
+
+# UID/GID of the in-container 'node' user. Defaults to the builder's, so
+# bind-mounted host dirs are writable. Override: make open-code HOST_UID=1000
+HOST_UID ?= $(shell id -u)
+HOST_GID ?= $(shell id -g)
 
 # Note: the apt tool list lives in base/Dockerfile (LOCAL_TOOLS ARG), which is
 # the single source of truth. Add tools there, not here.
@@ -16,6 +21,8 @@ all: base claude-code openai-codex
 base:
 	@echo "Building base image"
 	$(CONTAINER_ENGINE) build \
+		--build-arg HOST_UID=$(HOST_UID) \
+		--build-arg HOST_GID=$(HOST_GID) \
 		-t agent-base \
 		-f base/Dockerfile base
 

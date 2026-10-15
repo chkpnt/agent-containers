@@ -3,7 +3,7 @@ FROM node:26-slim
 ARG TARGETARCH
 # Single source of truth for apt-installed tooling. Override per-build with:
 #   docker build --build-arg LOCAL_TOOLS="..." -f base/Dockerfile base
-ARG LOCAL_TOOLS="git curl jq ripgrep vim nano make zip unzip ssh-client wget tree imagemagick ca-certificates gnupg procps build-essential python3 python3-pip redis-tools"
+ARG LOCAL_TOOLS="git curl jq ripgrep vim nano make zip unzip ssh-client wget tree imagemagick ffmpeg ca-certificates gnupg procps build-essential python3 python3-pip redis-tools"
 
 # 1. Install System Dependencies (as root)
 RUN apt-get update && \

@@ -107,7 +107,13 @@ oc2 --gpu                 # same with --gpus all
 oc2 shell [--gpu]         # bash in the same container setup
 oc2 remote http://10.8.0.5:4096   # TUI against a running server
 oc2 connect myserver      # SSH tunnel to myserver:4096 (127.0.0.1 there), then TUI
+oc2 disconnect myserver   # close that tunnel
 ```
+
+`oc2 connect` keeps one SSH tunnel per host (control socket in
+`~/.cache/oc2/`). It stays up after the TUI exits, so several clients can share
+it; the next `connect` reuses it. Local port: the first free one from
+`OC2_LOCAL_PORT` (14096) upwards, so you can connect to several servers at once.
 
 Per-machine settings in `~/.config/oc2.env` (sourced bash):
 
@@ -116,6 +122,7 @@ OC2_PROJECTS=$HOME/Projects
 OC2_SSH_KEY=$HOME/.ssh/ptaq-agent
 OC2_EXTRA_MOUNTS=("$HOME/.config/nvim/nvchad")
 OPENCODE_PASSWORD=...            # for remote/connect
+OC2_LOCAL_PORT=14096             # first local port tried by connect
 EXA_API_KEY=...
 ```
 

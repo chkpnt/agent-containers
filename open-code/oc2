@@ -4,7 +4,8 @@
 #   oc2 [--gpu] [opencode args...]       local TUI in $PWD, private (--standalone) server
 #   oc2 shell [--gpu]                    bash in the same container setup
 #   oc2 remote <url> [opencode args...]  TUI against a running server (e.g. over VPN)
-#   oc2 connect <ssh-host> [port]        SSH tunnel to a server bound to 127.0.0.1, then TUI
+#   oc2 connect <ssh-host> [port]        shared SSH tunnel to a server bound to 127.0.0.1, then TUI
+#   oc2 disconnect <ssh-host>            close that tunnel
 #
 # Every path is mounted at the same absolute path as on the host (see README).
 # Per-machine settings go to ${XDG_CONFIG_HOME:-~/.config}/oc2.env (sourced):
@@ -12,7 +13,7 @@
 #   OC2_PROJECTS=$HOME/Projects
 #   OC2_SSH_KEY=$HOME/.ssh/ptaq-agent           # .pub next to it is mounted too
 #   OC2_EXTRA_MOUNTS=($HOME/.config/nvim/nvchad) # bash array, same-path mounts
-#   OC2_LOCAL_PORT=14096                         # local end of `oc2 connect`
+#   OC2_LOCAL_PORT=14096                         # first local port tried by `oc2 connect`
 #   OPENCODE_PASSWORD=...                        # for remote/connect
 set -euo pipefail
 
@@ -87,6 +88,35 @@ $GPU && ARGS+=(--gpus all)
 PROJ="$(basename "$PWD_REAL")"
 run() { docker run --name "oc2-${PROJ}-$$" "${ARGS[@]}" "$OC2_IMAGE" "$@"; }
 
+# Shared SSH tunnels: one ssh master per host, kept after the client exits so
+# several clients can use it; closed with `oc2 disconnect <host>`.
+TUNNEL_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/oc2"
+tunnel_paths() {
+  local id="${1//[^A-Za-z0-9._@-]/_}"
+  SOCK="$TUNNEL_DIR/ssh-$id.sock"
+  PORTFILE="$TUNNEL_DIR/ssh-$id.port"
+}
+tunnel_up() {
+  tunnel_paths "$1"
+  [ -S "$SOCK" ] && [ -s "$PORTFILE" ] && ssh -S "$SOCK" -O check "$1" 2>/dev/null
+}
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+tunnel_start() {
+  local host="$1" rport="$2" lport="$OC2_LOCAL_PORT"
+  tunnel_paths "$host"
+  mkdir -p "$TUNNEL_DIR"
+  rm -f "$SOCK" "$PORTFILE"
+  # first free local port from OC2_LOCAL_PORT up, so several hosts can be connected
+  while port_busy "$lport"; do
+    lport=$((lport + 1))
+    [ "$lport" -lt $((OC2_LOCAL_PORT + 100)) ] || die "no free local port near $OC2_LOCAL_PORT"
+  done
+  ssh -f -N -M -S "$SOCK" -o ExitOnForwardFailure=yes \
+    -L "127.0.0.1:${lport}:127.0.0.1:${rport}" "$host"
+  echo "$lport" >"$PORTFILE"
+  echo "oc2: tunnel 127.0.0.1:$lport -> $host:$rport (close: oc2 disconnect $host)" >&2
+}
+
 case "${1:-}" in
   shell)
     shift
@@ -104,11 +134,20 @@ case "${1:-}" in
     shift
     host="${1:?usage: oc2 connect <ssh-host> [remote-port]}"
     rport="${2:-4096}"
-    sock="$(mktemp -u "${TMPDIR:-/tmp}/oc2-ssh.XXXXXX")"
-    ssh -f -N -M -S "$sock" -o ExitOnForwardFailure=yes \
-      -L "127.0.0.1:${OC2_LOCAL_PORT}:127.0.0.1:${rport}" "$host"
-    trap 'ssh -S "$sock" -O exit "$host" 2>/dev/null || true' EXIT
-    run opencode --server "http://127.0.0.1:${OC2_LOCAL_PORT}"
+    tunnel_up "$host" || tunnel_start "$host" "$rport"
+    run opencode --server "http://127.0.0.1:$(cat "$PORTFILE")"
+    ;;
+  disconnect)
+    shift
+    host="${1:?usage: oc2 disconnect <ssh-host>}"
+    tunnel_paths "$host"
+    if tunnel_up "$host"; then
+      ssh -S "$SOCK" -O exit "$host" 2>/dev/null || true
+      echo "oc2: tunnel to $host closed" >&2
+    else
+      echo "oc2: no tunnel to $host" >&2
+    fi
+    rm -f "$PORTFILE"
     ;;
   *)
     run opencode --standalone "$@"

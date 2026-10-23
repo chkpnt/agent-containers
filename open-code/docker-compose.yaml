@@ -7,6 +7,7 @@
 #   docker compose --profile gpu down
 #
 # Only run one profile at a time (both listen on the same port).
+# Caddy terminates TLS on ${HTTPS_PORT} and proxies to 127.0.0.1:${PORT}.
 # Every host path is mounted at the SAME absolute path inside the container,
 # so git worktrees, pnpm's node_modules symlinks and `docker run -v $PWD:...`
 # (via docker.sock) resolve identically on host and in the container.
@@ -57,3 +58,21 @@ services:
     <<: *opencode
     profiles: [cpu]
     container_name: opencode-v2-cpu
+
+  # HTTPS in front of the server (browser/mobile). Starts with either profile.
+  caddy:
+    image: caddy:2
+    container_name: opencode-v2-caddy
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      HTTPS_PORT: ${HTTPS_PORT:-4443}
+      PORT: ${PORT:-4096}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${TLS_CERT:?set TLS_CERT in .env}:/certs/tls.crt:ro
+      - ${TLS_KEY:?set TLS_KEY in .env}:/certs/tls.key:ro
+      - caddy-data:/data
+
+volumes:
+  caddy-data:

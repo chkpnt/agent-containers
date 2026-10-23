@@ -5,7 +5,7 @@ Two images live side by side:
 | image          | base            | OpenCode            | launcher | config/state dirs on host          |
 |----------------|-----------------|---------------------|----------|------------------------------------|
 | `open-code:v1` | `agent-base`    | `opencode-ai` (1.x) | `oc1`    | `~/.config/opencode`, ...          |
-| `open-code:v2` | `agent-base:v2` | `@opencode/cli` (2.x) | `oc2`, `compose.yaml` | `~/.config/opencode-v2`, ... |
+| `open-code:v2` | `agent-base:v2` | `@opencode/cli` (2.x) | `oc2`, `docker-compose.yaml` | `~/.config/opencode-v2`, ... |
 
 v1 and v2 must not share config/state (v2 converts it in place, v1 cannot read
 it back), hence the separate `*-v2` directories on the host. Inside the
@@ -115,7 +115,7 @@ Per-machine settings in `~/.config/oc2.env` (sourced bash):
 OC2_PROJECTS=$HOME/Projects
 OC2_SSH_KEY=$HOME/.ssh/ptaq-agent
 OC2_EXTRA_MOUNTS=("$HOME/.config/nvim/nvchad")
-OPENCODE_SERVER_PASSWORD=...     # for remote/connect
+OPENCODE_PASSWORD=...            # for remote/connect
 EXA_API_KEY=...
 ```
 
@@ -128,7 +128,7 @@ per-user background service via `~/.local/state/opencode/service.json`. With
 `--network=host` and shared state a container client could attach to a
 service running elsewhere (host or another container) and run tools there.
 
-## Server: `compose.yaml`
+## Server: `docker-compose.yaml`
 
 One long-running `opencode serve` per server, all projects mounted, clients
 attach (TUI from laptop, Android app over VPN).
@@ -145,9 +145,39 @@ docker compose --profile gpu logs -f
 ```
 
 - Password protected (`OPENCODE_SERVER_PASSWORD`, basic auth user `opencode`).
-- `BIND_IP=0.0.0.0` exposes the port on all interfaces: firewall it to the VPN
-  (e.g. `ufw allow in on tun0 to any port 4096`) or set `BIND_IP` to the
-  VPN IP / `127.0.0.1` and use `oc2 connect`.
+  Clients read the same value from `OPENCODE_PASSWORD`.
+- `BIND_IP=127.0.0.1` (default): reachable only through Caddy (HTTPS) or an
+  SSH tunnel. `0.0.0.0` exposes plain HTTP on all interfaces; firewall it.
+
+### HTTPS / browser / phone
+
+`caddy` (starts with either profile) serves
+`https://<host>:${HTTPS_PORT:-4443}` with `TLS_CERT`/`TLS_KEY` (e.g. a
+`*.datera.internal` wildcard) and proxies to the server. Open it, log in as
+`opencode` + password, "add to home screen" on the phone.
+
+- Why not plain `http://<host>:4096`: if another app on the same hostname sends
+  HSTS, the browser upgrades every port to https and fails with
+  `SSL_ERROR_RX_RECORD_TOO_LONG`.
+- Devices need the issuing CA installed. The OpenCode Android app may ignore
+  user-installed CAs; the browser does not.
+- Serving under a path (`https://host/oc/`) does not work yet: the UI uses
+  root-relative URLs, base-path support is unfinished
+  ([#28326](https://github.com/anomalyco/opencode/pull/28326)). A subdomain
+  routed through an existing proxy works.
+- Firewall: `ufw allow in on tun0 to any port 4443`.
+
+### Clients
+
+```bash
+oc2 connect myserver                          # SSH tunnel, works with BIND_IP=127.0.0.1
+# TUI on the server itself, in the current project:
+docker exec -it -u "$(id -u):$(id -g)" -e HOME="$HOME" -w "$PWD" \
+  opencode-v2-gpu opencode --server http://127.0.0.1:4096
+```
+
+Recreating the container (`docker compose up -d`) kills the server the agent
+runs on; do that yourself, not from an agent session. Sessions persist.
 - The server starts in `PROJECTS_DIR`. Known bug
   ([#47665](https://github.com/anomalyco/opencode/issues/47665)): a `--server`
   client sends its *local* cwd as project directory; therefore `oc2 remote`

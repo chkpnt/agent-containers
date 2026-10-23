@@ -1,0 +1,13 @@
+{
+	admin off
+	# port 80 may belong to another proxy on the host
+	auto_https disable_redirects
+}
+
+:{$HTTPS_PORT:4443} {
+	tls /certs/tls.crt /certs/tls.key
+	reverse_proxy 127.0.0.1:{$PORT:4096} {
+		# SSE event stream
+		flush_interval -1
+	}
+}

@@ -13,7 +13,7 @@
 #   OC2_SSH_KEY=$HOME/.ssh/ptaq-agent           # .pub next to it is mounted too
 #   OC2_EXTRA_MOUNTS=($HOME/.config/nvim/nvchad) # bash array, same-path mounts
 #   OC2_LOCAL_PORT=14096                         # local end of `oc2 connect`
-#   OPENCODE_SERVER_PASSWORD=...                 # for remote/connect
+#   OPENCODE_PASSWORD=...                        # for remote/connect
 set -euo pipefail
 
 CFG="${XDG_CONFIG_HOME:-$HOME/.config}/oc2.env"
@@ -34,7 +34,12 @@ ARGS=(
   --network=host
   -e HOST_USER="$(id -un)" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e HOST_HOME="$HOME"
 )
-[ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && ARGS+=(-e OPENCODE_SERVER_PASSWORD)
+# v2 client reads OPENCODE_PASSWORD, `opencode serve` OPENCODE_SERVER_PASSWORD
+pw="${OPENCODE_PASSWORD:-${OPENCODE_SERVER_PASSWORD:-}}"
+if [ -n "$pw" ]; then
+  export OPENCODE_PASSWORD="$pw" OPENCODE_SERVER_PASSWORD="$pw"
+  ARGS+=(-e OPENCODE_PASSWORD -e OPENCODE_SERVER_PASSWORD)
+fi
 for v in EXA_API_KEY FIGMA_CLIENT_SECRET; do
   [ -n "${!v:-}" ] && ARGS+=(-e "$v")
 done

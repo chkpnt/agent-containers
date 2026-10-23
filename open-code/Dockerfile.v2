@@ -1,0 +1,15 @@
+# open-code:v2 — OpenCode v2 on the user-agnostic agent-base:v2.
+# The v1 image (open-code/Dockerfile, tagged open-code:v1) is left untouched.
+FROM agent-base:v2
+
+# Installed system-wide as root (/usr/local); the runtime user cannot modify
+# it, so `opencode upgrade` is a no-op by design -> rebuild the image instead.
+# @opencode/cli's postinstall selects the native binary for this platform.
+RUN npm install -g @opencode/cli @anthropic-ai/claude-code && \
+    rm -rf /root/.npm && \
+    echo "OpenCode: $(opencode --version)" && \
+    echo "Claude Code: $(claude --version)"
+
+ENV OPENCODE_DISABLE_AUTOUPDATE=true
+
+CMD ["opencode"]

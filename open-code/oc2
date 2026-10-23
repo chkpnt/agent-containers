@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# OpenCode v2 launcher (image open-code:v2).
+#
+#   oc2 [--gpu] [opencode args...]       local TUI in $PWD, private (--standalone) server
+#   oc2 shell [--gpu]                    bash in the same container setup
+#   oc2 remote <url> [opencode args...]  TUI against a running server (e.g. over VPN)
+#   oc2 connect <ssh-host> [port]        SSH tunnel to a server bound to 127.0.0.1, then TUI
+#
+# Every path is mounted at the same absolute path as on the host (see README).
+# Per-machine settings go to ${XDG_CONFIG_HOME:-~/.config}/oc2.env (sourced):
+#   OC2_IMAGE=open-code:v2
+#   OC2_PROJECTS=$HOME/Projects
+#   OC2_SSH_KEY=$HOME/.ssh/ptaq-agent           # .pub next to it is mounted too
+#   OC2_EXTRA_MOUNTS=($HOME/.config/nvim/nvchad) # bash array, same-path mounts
+#   OC2_LOCAL_PORT=14096                         # local end of `oc2 connect`
+#   OPENCODE_SERVER_PASSWORD=...                 # for remote/connect
+set -euo pipefail
+
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/oc2.env"
+# shellcheck source=/dev/null
+[ -f "$CFG" ] && . "$CFG"
+
+OC2_IMAGE="${OC2_IMAGE:-open-code:v2}"
+OC2_PROJECTS="${OC2_PROJECTS:-$HOME/Projects}"
+OC2_SSH_KEY="${OC2_SSH_KEY:-}"
+OC2_LOCAL_PORT="${OC2_LOCAL_PORT:-14096}"
+if ! declare -p OC2_EXTRA_MOUNTS >/dev/null 2>&1; then OC2_EXTRA_MOUNTS=(); fi
+
+die() { echo "oc2: $*" >&2; exit 1; }
+
+ARGS=(
+  --rm --interactive --tty
+  --init
+  --network=host
+  -e HOST_USER="$(id -un)" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e HOST_HOME="$HOME"
+)
+[ -n "${OPENCODE_SERVER_PASSWORD:-}" ] && ARGS+=(-e OPENCODE_SERVER_PASSWORD)
+for v in EXA_API_KEY FIGMA_CLIENT_SECRET; do
+  [ -n "${!v:-}" ] && ARGS+=(-e "$v")
+done
+
+MOUNTED=()
+# mount <host-path> [ro]: same path inside; skipped if missing so docker does
+# not create root-owned dirs on the host.
+mount_same() {
+  [ -e "$1" ] || { echo "oc2: skip missing $1" >&2; return 0; }
+  ARGS+=(-v "$1:$1${2:+:$2}")
+  MOUNTED+=("$1")
+}
+
+# opencode v2 dirs: host *-v2 copies at the default paths (see migrate-v2.sh)
+for d in .config/opencode .local/share/opencode .local/state/opencode .cache/opencode; do
+  mkdir -p "$HOME/$d-v2"
+  ARGS+=(-v "$HOME/$d-v2:$HOME/$d")
+done
+
+mount_same "$OC2_PROJECTS"
+mkdir -p "$HOME/.local/share/pnpm"   # shared pnpm store; must persist on the host
+mount_same "$HOME/.local/share/pnpm"
+mount_same "$HOME/.claude"
+mount_same "$HOME/.config/gh"
+if [ -n "$OC2_SSH_KEY" ]; then
+  [ -f "$OC2_SSH_KEY" ] || die "OC2_SSH_KEY=$OC2_SSH_KEY not found"
+  ARGS+=(-v "$OC2_SSH_KEY:$HOME/.ssh/id_ed25519:ro")
+  [ -f "$OC2_SSH_KEY.pub" ] && ARGS+=(-v "$OC2_SSH_KEY.pub:$HOME/.ssh/id_ed25519.pub:ro")
+fi
+for m in "${OC2_EXTRA_MOUNTS[@]}"; do mount_same "$m"; done
+
+# Working directory: $PWD, mounted on its own if not covered already.
+PWD_REAL="$(pwd -P)"
+covered=false
+for m in "${MOUNTED[@]}"; do
+  case "$PWD_REAL/" in "$m"/*) covered=true; break ;; esac
+done
+$covered || mount_same "$PWD_REAL"
+ARGS+=(-w "$PWD_REAL")
+
+GPU=false
+if [ "${1:-}" = "--gpu" ]; then GPU=true; shift; fi
+$GPU && ARGS+=(--gpus all)
+
+PROJ="$(basename "$PWD_REAL")"
+run() { docker run --name "oc2-${PROJ}-$$" "${ARGS[@]}" "$OC2_IMAGE" "$@"; }
+
+case "${1:-}" in
+  shell)
+    shift
+    if [ "${1:-}" = "--gpu" ]; then ARGS+=(--gpus all); shift; fi
+    run bash "$@"
+    ;;
+  remote)
+    shift
+    url="${1:?usage: oc2 remote <url> [opencode args...]}"; shift
+    # No directory argument: with --server the client would send its own cwd
+    # (anomalyco/opencode#47665); the server uses its working_dir instead.
+    run opencode --server "$url" "$@"
+    ;;
+  connect)
+    shift
+    host="${1:?usage: oc2 connect <ssh-host> [remote-port]}"
+    rport="${2:-4096}"
+    sock="$(mktemp -u "${TMPDIR:-/tmp}/oc2-ssh.XXXXXX")"
+    ssh -f -N -M -S "$sock" -o ExitOnForwardFailure=yes \
+      -L "127.0.0.1:${OC2_LOCAL_PORT}:127.0.0.1:${rport}" "$host"
+    trap 'ssh -S "$sock" -O exit "$host" 2>/dev/null || true' EXIT
+    run opencode --server "http://127.0.0.1:${OC2_LOCAL_PORT}"
+    ;;
+  *)
+    run opencode --standalone "$@"
+    ;;
+esac

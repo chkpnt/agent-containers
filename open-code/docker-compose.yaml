@@ -1,0 +1,59 @@
+# OpenCode v2 server (headless `opencode serve`) for remote/bare-metal hosts.
+#
+#   cp .env.example .env   # fill in, chmod 600 .env
+#   docker compose --profile gpu up -d    # all GPUs
+#   docker compose --profile cpu up -d    # no GPU
+#   docker compose --profile gpu logs -f
+#   docker compose --profile gpu down
+#
+# Only run one profile at a time (both listen on the same port).
+# Every host path is mounted at the SAME absolute path inside the container,
+# so git worktrees, pnpm's node_modules symlinks and `docker run -v $PWD:...`
+# (via docker.sock) resolve identically on host and in the container.
+
+x-opencode: &opencode
+  image: open-code:v2
+  init: true
+  restart: unless-stopped
+  network_mode: host
+  env_file: .env
+  environment:
+    # basic auth for the server; username defaults to "opencode"
+    OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD in .env}
+  working_dir: ${PROJECTS_DIR:-${HOST_HOME}/Projects}
+  command: ["opencode", "serve", "--hostname", "${BIND_IP:-0.0.0.0}", "--port", "${PORT:-4096}"]
+  volumes:
+    # projects
+    - ${PROJECTS_DIR:-${HOST_HOME}/Projects}:${PROJECTS_DIR:-${HOST_HOME}/Projects}
+    # opencode v2 dirs (host *-v2 copies, see migrate-v2.sh) at the default paths
+    - ${HOST_HOME}/.config/opencode-v2:${HOST_HOME}/.config/opencode
+    - ${HOST_HOME}/.local/share/opencode-v2:${HOST_HOME}/.local/share/opencode
+    - ${HOST_HOME}/.local/state/opencode-v2:${HOST_HOME}/.local/state/opencode
+    - ${HOST_HOME}/.cache/opencode-v2:${HOST_HOME}/.cache/opencode
+    # pnpm store shared with the host (same path -> identical installs)
+    - ${HOST_HOME}/.local/share/pnpm:${HOST_HOME}/.local/share/pnpm
+    # tool auth
+    - ${HOST_HOME}/.claude:${HOST_HOME}/.claude
+    - ${HOST_HOME}/.config/gh:${HOST_HOME}/.config/gh
+    - ${AGENT_SSH_KEY:?set AGENT_SSH_KEY in .env}:${HOST_HOME}/.ssh/id_ed25519:ro
+    - ${AGENT_SSH_KEY}.pub:${HOST_HOME}/.ssh/id_ed25519.pub:ro
+    # WARNING: docker.sock == root on the host
+    - /var/run/docker.sock:/var/run/docker.sock
+
+services:
+  opencode-gpu:
+    <<: *opencode
+    profiles: [gpu]
+    container_name: opencode-v2-gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  opencode-cpu:
+    <<: *opencode
+    profiles: [cpu]
+    container_name: opencode-v2-cpu

@@ -26,6 +26,7 @@ x-opencode: &opencode
   volumes:
     # projects
     - ${PROJECTS_DIR:-${HOST_HOME}/Projects}:${PROJECTS_DIR:-${HOST_HOME}/Projects}
+    - /opt/services:/opt/services
     # opencode v2 dirs (host *-v2 copies, see migrate-v2.sh) at the default paths
     - ${HOST_HOME}/.config/opencode-v2:${HOST_HOME}/.config/opencode
     - ${HOST_HOME}/.local/share/opencode-v2:${HOST_HOME}/.local/share/opencode

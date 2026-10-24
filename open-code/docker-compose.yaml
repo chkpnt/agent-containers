@@ -46,6 +46,8 @@ x-opencode: &opencode
     # tool auth
     - ${HOST_HOME}/.claude:${HOST_HOME}/.claude
     - ${HOST_HOME}/.config/gh:${HOST_HOME}/.config/gh
+    # git identity; must exist on the host or docker creates a directory in its place
+    - ${HOST_HOME}/.gitconfig:${HOST_HOME}/.gitconfig:ro
     - ${AGENT_SSH_KEY:?set AGENT_SSH_KEY in .env}:${HOST_HOME}/.ssh/id_ed25519:ro
     - ${AGENT_SSH_KEY}.pub:${HOST_HOME}/.ssh/id_ed25519.pub:ro
     # extra CAs (*.crt/*.pem) trusted by system, Node and Chromium (entrypoint.sh)

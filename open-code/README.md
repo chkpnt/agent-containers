@@ -140,7 +140,7 @@ EXA_API_KEY=...
 ```
 
 Mounted: `$OC2_PROJECTS`, `$PWD` (if outside it), the `*-v2` OpenCode dirs,
-`~/.local/share/pnpm`, `~/.claude`, `~/.config/gh`, the SSH key, extras.
+`~/.local/share/pnpm`, `~/.claude`, `~/.config/gh`, `~/.gitconfig` and `~/.config/git` (read-only), the SSH key, extras.
 Missing paths are skipped (Docker would otherwise create them as root).
 
 `oc2` uses `--standalone` on purpose: v2 otherwise discovers/starts a shared

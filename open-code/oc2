@@ -66,6 +66,8 @@ mkdir -p "$HOME/.local/share/pnpm"   # shared pnpm store; must persist on the ho
 mount_same "$HOME/.local/share/pnpm"
 mount_same "$HOME/.claude"
 mount_same "$HOME/.config/gh"
+mount_same "$HOME/.gitconfig" ro
+mount_same "$HOME/.config/git" ro
 if [ -n "$OC2_SSH_KEY" ]; then
   [ -f "$OC2_SSH_KEY" ] || die "OC2_SSH_KEY=$OC2_SSH_KEY not found"
   ARGS+=(-v "$OC2_SSH_KEY:$HOME/.ssh/id_ed25519:ro")

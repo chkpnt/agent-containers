@@ -136,6 +136,10 @@ RUN echo '[ -f /etc/agent/bash_aliases ] && . /etc/agent/bash_aliases' >> /etc/b
 
 # uv: project dirs and ~/.cache/uv are different mounts -> hardlinks fail.
 ENV UV_LINK_MODE=copy
+# pnpm: same problem, but it falls back to copying all of node_modules into
+# every checkout. The global virtual store links packages inside the store and
+# leaves only symlinks in the project, which work across mounts.
+ENV PNPM_CONFIG_VIRTUAL_STORE_TYPE=global
 
 COPY ./entrypoint.sh /usr/local/bin/entrypoint.sh
 # Build-time tool runs leave root-owned dirs in /tmp (node-compile-cache, ...)

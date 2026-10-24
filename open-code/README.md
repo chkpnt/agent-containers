@@ -59,17 +59,20 @@ not `/app`). This fixes:
 - **docker.sock**: `docker run -v $PWD:...` issued by the agent is resolved by
   the host daemon, so paths have to be host paths.
 
-### pnpm global virtual store (optional, per repo)
+### pnpm global virtual store (on by default)
 
-Makes new worktrees almost free (`node_modules` = symlinks into the shared
-store). Experimental; add to the repo's `pnpm-workspace.yaml`:
+Projects and the store are different mounts, so hardlinks between them fail
+(`EXDEV`) and pnpm silently copies the whole `node_modules` into every
+checkout. The image sets `PNPM_CONFIG_VIRTUAL_STORE_TYPE=global` (pnpm >= 11.23):
+packages are linked once inside the store and `node_modules` holds only
+symlinks, which work across mounts and make new worktrees almost free.
+Experimental; to opt out, run the container with
+`-e PNPM_CONFIG_VIRTUAL_STORE_TYPE=project`.
 
-```yaml
-virtualStoreType: global        # pnpm >= 11.23 (older: enableGlobalVirtualStore: true)
-```
-
-See https://pnpm.io/git-worktrees. Symlinks are relative, so the store must be
-mounted at the same path too (it is).
+pnpm env vars beat both `~/.config/pnpm/config.yaml` and a repo's
+`pnpm-workspace.yaml`. See
+https://pnpm.io/git-worktrees. The store must be mounted at the same path as on
+the host (it is).
 
 ### Worktrees in OpenCode
 

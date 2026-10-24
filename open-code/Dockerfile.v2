@@ -8,7 +8,8 @@ FROM agent-base:v2
 RUN npm install -g @opencode/cli @anthropic-ai/claude-code && \
     rm -rf /root/.npm && \
     echo "OpenCode: $(opencode --version)" && \
-    echo "Claude Code: $(claude --version)"
+    echo "Claude Code: $(claude --version)" && \
+    rm -rf /tmp/* /tmp/.[!.]*
 
 ENV OPENCODE_DISABLE_AUTOUPDATE=true
 

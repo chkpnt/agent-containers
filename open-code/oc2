@@ -13,6 +13,7 @@
 #   OC2_PROJECTS=$HOME/Projects
 #   OC2_SSH_KEY=$HOME/.ssh/ptaq-agent           # .pub next to it is mounted too
 #   OC2_EXTRA_MOUNTS=($HOME/.config/nvim/nvchad) # bash array, same-path mounts
+#   OC2_CA_DIR=$HOME/.config/agent-ca            # extra CAs (*.crt/*.pem) to trust
 #   OC2_LOCAL_PORT=14096                         # first local port tried by `oc2 connect`
 #   OPENCODE_PASSWORD=...                        # for remote/connect
 set -euo pipefail
@@ -71,6 +72,10 @@ if [ -n "$OC2_SSH_KEY" ]; then
   [ -f "$OC2_SSH_KEY.pub" ] && ARGS+=(-v "$OC2_SSH_KEY.pub:$HOME/.ssh/id_ed25519.pub:ro")
 fi
 for m in "${OC2_EXTRA_MOUNTS[@]}"; do mount_same "$m"; done
+if [ -n "${OC2_CA_DIR:-}" ]; then
+  [ -d "$OC2_CA_DIR" ] || die "OC2_CA_DIR=$OC2_CA_DIR not found"
+  ARGS+=(-v "$OC2_CA_DIR:/etc/agent/ca-certificates:ro")
+fi
 
 # Working directory: $PWD, mounted on its own if not covered already.
 PWD_REAL="$(pwd -P)"

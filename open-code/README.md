@@ -29,7 +29,16 @@ Add apt packages via `LOCAL_TOOLS` in `base/Dockerfile.v2`.
   start from `HOST_USER`, `HOST_UID`, `HOST_GID`, `HOST_HOME`
   (default `agent`/1000/`/home/agent`) and drops privileges with `setpriv`.
   Anyone can use the same image.
-- If `/var/run/docker.sock` is mounted, the user is added to its group.
+- If `/var/run/docker.sock` is mounted, the user is added to its group. The
+  Docker CLI with the `compose` and `buildx` plugins is in the image.
+- `git-lfs` is installed and enabled system-wide (pre-push hooks need it).
+- SSH host keys for `SSH_KNOWN_HOSTS` (build arg, default GitHub + Bitbucket)
+  are in `/etc/ssh/ssh_known_hosts`.
+- Extra CAs: PEM files (one CA per file, `*.crt`/`*.pem`) mounted at
+  `/etc/agent/ca-certificates` are trusted by the system store, Node
+  (`NODE_EXTRA_CA_CERTS`) and Chromium/agent-browser (user NSS db). Compose
+  mounts `AGENT_CA_DIR` (default `open-code/ca-certificates/`, git-ignored),
+  `oc2` mounts `OC2_CA_DIR`.
 - `npm i -g` / `bun` installs go to `$HOME/.local` / `$HOME/.bun`.
 - pnpm `storeDir` defaults to `$HOME/.local/share/pnpm/store` (written to
   `~/.config/pnpm/config.yaml` only if that file does not exist yet).
@@ -121,6 +130,7 @@ Per-machine settings in `~/.config/oc2.env` (sourced bash):
 OC2_PROJECTS=$HOME/Projects
 OC2_SSH_KEY=$HOME/.ssh/ptaq-agent
 OC2_EXTRA_MOUNTS=("$HOME/.config/nvim/nvchad")
+OC2_CA_DIR=$HOME/.config/agent-ca  # extra CAs to trust (optional)
 OPENCODE_PASSWORD=...            # for remote/connect
 OC2_LOCAL_PORT=14096             # first local port tried by connect
 EXA_API_KEY=...
@@ -155,6 +165,14 @@ docker compose --profile gpu logs -f
   Clients read the same value from `OPENCODE_PASSWORD`.
 - `BIND_IP=127.0.0.1` (default): reachable only through Caddy (HTTPS) or an
   SSH tunnel. `0.0.0.0` exposes plain HTTP on all interfaces; firewall it.
+- `.env` is used for compose interpolation only; the container gets the
+  variables listed under `environment:`. Add new `{env:NAME}` secrets there.
+  (Passing the whole file leaked `PORT=4096` into the agent's shells, so dev
+  servers reading `PORT` collided with OpenCode.)
+- Dev servers the agent starts are on the host network. Open them from
+  another machine through an SSH tunnel
+  (`ssh -N -L 4200:localhost:4200 <server>`): apps that need a secure context
+  (Web Crypto, service workers) only get one on `localhost` or HTTPS.
 
 ### HTTPS / browser / phone
 
@@ -199,7 +217,7 @@ ssh-keygen -t ed25519 -f ~/.ssh/ptaq-agent -C "opencode-agent"
 # add ~/.ssh/ptaq-agent.pub to GitHub; set OC2_SSH_KEY / AGENT_SSH_KEY
 ```
 
-GitHub host keys are in `/etc/ssh/ssh_known_hosts`. Verify inside:
+GitHub and Bitbucket host keys are in `/etc/ssh/ssh_known_hosts`. Verify inside:
 
 ```bash
 ssh -T git@github.com

@@ -79,6 +79,34 @@ if [ -S "$SOCK" ]; then
   fi
 fi
 
+# --- extra CA certificates ---------------------------------------------------
+# PEM files (*.crt / *.pem, one CA per file) mounted at /etc/agent/ca-certificates
+# are trusted by the system store (curl, git, python), Node
+# (NODE_EXTRA_CA_CERTS) and the user's NSS db (Chromium / agent-browser).
+CA_SRC=/etc/agent/ca-certificates
+CA_FILES=()
+if [ -d "$CA_SRC" ]; then
+  mapfile -t CA_FILES < <(find -L "$CA_SRC" -maxdepth 1 -type f \( -name '*.crt' -o -name '*.pem' \) | sort)
+fi
+if [ "${#CA_FILES[@]}" -gt 0 ]; then
+  mkdir -p /usr/local/share/ca-certificates/agent
+  for f in "${CA_FILES[@]}"; do
+    name="$(basename "$f")"
+    cp "$f" "/usr/local/share/ca-certificates/agent/${name%.*}.crt"
+  done
+  update-ca-certificates >/dev/null 2>&1 || log "update-ca-certificates failed"
+  export NODE_EXTRA_CA_CERTS="${NODE_EXTRA_CA_CERTS:-/etc/ssl/certs/ca-certificates.crt}"
+
+  NSSDB="$HOME_/.pki/nssdb"
+  as_user mkdir -p "$NSSDB"
+  [ -f "$NSSDB/cert9.db" ] || as_user certutil -N -d "sql:$NSSDB" --empty-password
+  for f in "${CA_FILES[@]}"; do
+    as_user certutil -A -d "sql:$NSSDB" -n "agent-$(basename "$f")" -t "C,," -i "$f" \
+      || log "could not add $f to $NSSDB"
+  done
+  log "trusted ${#CA_FILES[@]} CA file(s) from $CA_SRC"
+fi
+
 # --- gh extensions (staged in /opt by the image) -----------------------------
 if [ -d /opt/gh-extensions ]; then
   as_user mkdir -p "$HOME_/.local/share/gh/extensions"

@@ -17,10 +17,19 @@ x-opencode: &opencode
   init: true
   restart: unless-stopped
   network_mode: host
-  env_file: .env
+  # No env_file: .env is only read for ${...} interpolation here. Passing it
+  # wholesale leaked server settings (PORT=4096, ...) into every shell the
+  # agent spawns, where apps picked them up. List what the container needs.
   environment:
+    HOST_USER: ${HOST_USER:?set HOST_USER in .env}
+    HOST_UID: ${HOST_UID:?set HOST_UID in .env}
+    HOST_GID: ${HOST_GID:?set HOST_GID in .env}
+    HOST_HOME: ${HOST_HOME:?set HOST_HOME in .env}
     # basic auth for the server; username defaults to "opencode"
     OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD in .env}
+    # secrets referenced from opencode.json as {env:NAME}
+    EXA_API_KEY: ${EXA_API_KEY:-}
+    FIGMA_CLIENT_SECRET: ${FIGMA_CLIENT_SECRET:-}
   working_dir: ${PROJECTS_DIR:-${HOST_HOME}/Projects}
   command: ["opencode", "serve", "--hostname", "${BIND_IP:-0.0.0.0}", "--port", "${PORT:-4096}"]
   volumes:
@@ -39,6 +48,8 @@ x-opencode: &opencode
     - ${HOST_HOME}/.config/gh:${HOST_HOME}/.config/gh
     - ${AGENT_SSH_KEY:?set AGENT_SSH_KEY in .env}:${HOST_HOME}/.ssh/id_ed25519:ro
     - ${AGENT_SSH_KEY}.pub:${HOST_HOME}/.ssh/id_ed25519.pub:ro
+    # extra CAs (*.crt/*.pem) trusted by system, Node and Chromium (entrypoint.sh)
+    - ${AGENT_CA_DIR:-./ca-certificates}:/etc/agent/ca-certificates:ro
     # WARNING: docker.sock == root on the host
     - /var/run/docker.sock:/var/run/docker.sock
 

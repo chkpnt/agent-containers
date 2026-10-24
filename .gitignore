@@ -1,2 +1,4 @@
 .env
 certs/
+open-code/ca-certificates/*
+!open-code/ca-certificates/.gitkeep

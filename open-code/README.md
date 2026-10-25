@@ -213,6 +213,50 @@ runs on; do that yourself, not from an agent session. Sessions persist.
 - `/var/run/docker.sock` is mounted: that is root-equivalent on the host. The
   container limits accidents (wrong paths, `rm -rf`), not a malicious agent.
 
+## Agent workflows (`workflows` profile)
+
+Deterministic agent workflows (e.g. DWA `pnpm wf implement-issue <n>`) run on
+[Hatchet](https://docs.hatchet.run). Every agent step is a session on this
+server, so you can open it from any OpenCode client and step in.
+
+| Service | Port (loopback) | Public (Caddy, TLS) | Purpose |
+| --- | --- | --- | --- |
+| `hatchet-lite` | 8888 UI, 7077 gRPC | `https://<PUBLIC_HOST>:4444` | engine + dashboard |
+| `hatchet-postgres` | - (compose network) | - | Hatchet database |
+| `ntfy` | 2586 | `https://<PUBLIC_HOST>:4445` | push notifications |
+| `workflow-worker` | none (dials out) | - | runs the workflows of `WF_WORKER_DIR` |
+
+The worker uses the same image and mounts as the server but is a separate
+container: restarting it (new workflow code) does not touch agent sessions.
+It talks to the server on `127.0.0.1:${PORT}` and to Hatchet on
+`127.0.0.1:7077`. The workflow code lives in the project, not here.
+
+Setup (once):
+
+```bash
+# .env: COMPOSE_PROFILES=gpu,workflows, PUBLIC_HOST, HATCHET_DB_PASSWORD,
+#       HATCHET_ADMIN_PASSWORD, NTFY_* and WF_WORKER_DIR (see .env.example)
+docker run --rm -it binwiederhier/ntfy:v2.34.0 user hash   # -> NTFY_PASSWORD_HASH (single-quoted)
+echo "tk_$(openssl rand -hex 32 | head -c 29)"              # -> NTFY_TOKEN
+docker compose up -d hatchet-postgres hatchet-lite ntfy caddy
+# worker token -> HATCHET_CLIENT_TOKEN in .env
+docker exec opencode-v2-hatchet /hatchet-admin token create --config /config \
+  --tenant-id 707d0855-80ab-4e1f-a156-f1c4546cbf52 --name workflow-worker --expiresIn 87600h
+docker compose up -d workflow-worker
+# the server needs HATCHET_* too (to trigger runs from a session); this kills it:
+docker compose up -d opencode-gpu
+```
+
+- Dashboard: log in with `HATCHET_ADMIN_EMAIL` / `HATCHET_ADMIN_PASSWORD`;
+  signup is disabled. Tenant `Default`.
+- ntfy Android app: add server `https://<PUBLIC_HOST>:4445` with user
+  `NTFY_USER` / `NTFY_PASSWORD`, subscribe to `NTFY_TOPIC`. Anonymous access
+  is denied. The phone needs the issuing CA (same as for the web UI).
+- `WF_WORKER_DIR`: a checkout of the project that tracks `master` (e.g. a
+  worktree `.worktrees/wf-worker`); update it and
+  `docker compose restart workflow-worker` to deploy workflow changes.
+- Firewall: `ufw allow in on tun0 to any port 4444,4445 proto tcp`.
+
 ## GitHub access via a dedicated SSH key
 
 ```bash

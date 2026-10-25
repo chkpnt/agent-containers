@@ -6,11 +6,38 @@
 #   docker compose --profile gpu logs -f
 #   docker compose --profile gpu down
 #
-# Only run one profile at a time (both listen on the same port).
-# Caddy terminates TLS on ${HTTPS_PORT} and proxies to 127.0.0.1:${PORT}.
+# Only run one of gpu/cpu at a time (both listen on the same port). Add the
+# `workflows` profile for Hatchet, ntfy and the workflow worker, e.g.
+# COMPOSE_PROFILES=gpu,workflows in .env.
+# Caddy terminates TLS on ${HTTPS_PORT} and proxies to 127.0.0.1:${PORT};
+# with `workflows` also the Hatchet dashboard and ntfy (see Caddyfile).
 # Every host path is mounted at the SAME absolute path inside the container,
 # so git worktrees, pnpm's node_modules symlinks and `docker run -v $PWD:...`
 # (via docker.sock) resolve identically on host and in the container.
+
+# Shared by the server (the agent triggers workflow runs through the CLI) and
+# the worker. A YAML merge is shallow, so services merge this map explicitly.
+x-opencode-env: &opencode-env
+  HOST_USER: ${HOST_USER:?set HOST_USER in .env}
+  HOST_UID: ${HOST_UID:?set HOST_UID in .env}
+  HOST_GID: ${HOST_GID:?set HOST_GID in .env}
+  HOST_HOME: ${HOST_HOME:?set HOST_HOME in .env}
+  # basic auth for the server; username defaults to "opencode"
+  OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD in .env}
+  # secrets referenced from opencode.json as {env:NAME}
+  EXA_API_KEY: ${EXA_API_KEY:-}
+  FIGMA_CLIENT_SECRET: ${FIGMA_CLIENT_SECRET:-}
+  # agent workflows (workflows profile); empty values are harmless without it
+  OPENCODE_URL: http://127.0.0.1:${PORT:-4096}
+  OPENCODE_PUBLIC_URL: https://${PUBLIC_HOST:-localhost}:${HTTPS_PORT:-4443}
+  HATCHET_CLIENT_TOKEN: ${HATCHET_CLIENT_TOKEN:-}
+  HATCHET_CLIENT_HOST_PORT: 127.0.0.1:${HATCHET_GRPC_PORT:-7077}
+  HATCHET_CLIENT_TLS_STRATEGY: none
+  HATCHET_PUBLIC_URL: https://${PUBLIC_HOST:-localhost}:${HATCHET_HTTPS_PORT:-4444}
+  NTFY_URL: http://127.0.0.1:${NTFY_PORT:-2586}
+  NTFY_PUBLIC_URL: https://${PUBLIC_HOST:-localhost}:${NTFY_HTTPS_PORT:-4445}
+  NTFY_TOPIC: ${NTFY_TOPIC:-agent-workflows}
+  NTFY_TOKEN: ${NTFY_TOKEN:-}
 
 x-opencode: &opencode
   image: open-code:v2
@@ -20,16 +47,7 @@ x-opencode: &opencode
   # No env_file: .env is only read for ${...} interpolation here. Passing it
   # wholesale leaked server settings (PORT=4096, ...) into every shell the
   # agent spawns, where apps picked them up. List what the container needs.
-  environment:
-    HOST_USER: ${HOST_USER:?set HOST_USER in .env}
-    HOST_UID: ${HOST_UID:?set HOST_UID in .env}
-    HOST_GID: ${HOST_GID:?set HOST_GID in .env}
-    HOST_HOME: ${HOST_HOME:?set HOST_HOME in .env}
-    # basic auth for the server; username defaults to "opencode"
-    OPENCODE_SERVER_PASSWORD: ${OPENCODE_SERVER_PASSWORD:?set OPENCODE_SERVER_PASSWORD in .env}
-    # secrets referenced from opencode.json as {env:NAME}
-    EXA_API_KEY: ${EXA_API_KEY:-}
-    FIGMA_CLIENT_SECRET: ${FIGMA_CLIENT_SECRET:-}
+  environment: *opencode-env
   working_dir: ${PROJECTS_DIR:-${HOST_HOME}/Projects}
   command: ["opencode", "serve", "--hostname", "${BIND_IP:-0.0.0.0}", "--port", "${PORT:-4096}"]
   volumes:
@@ -73,6 +91,98 @@ services:
     profiles: [cpu]
     container_name: opencode-v2-cpu
 
+  # Hatchet worker for the agent workflows versioned in a project (DWA:
+  # tools/agent-workflows). Same image and mounts as the server, no ports: it
+  # only dials out to Hatchet (gRPC) and the server (HTTP), and restarts
+  # without touching running agent sessions.
+  workflow-worker:
+    <<: *opencode
+    profiles: [workflows]
+    container_name: opencode-v2-workflow-worker
+    working_dir: ${WF_WORKER_DIR:-${PROJECTS_DIR:-${HOST_HOME}/Projects}/datera/dwa}
+    command: ["pnpm", "wf", "worker"]
+    depends_on:
+      hatchet-lite:
+        condition: service_healthy
+
+  hatchet-postgres:
+    image: postgres:15.6
+    profiles: [workflows]
+    container_name: opencode-v2-hatchet-postgres
+    command: postgres -c 'max_connections=200'
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hatchet
+      POSTGRES_PASSWORD: ${HATCHET_DB_PASSWORD:-}
+      POSTGRES_DB: hatchet
+    volumes:
+      - hatchet-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d hatchet -U hatchet"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  # Workflow engine + dashboard (https://docs.hatchet.run/self-hosting/hatchet-lite).
+  # Published on loopback only; Caddy serves the dashboard with TLS.
+  hatchet-lite:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.8
+    profiles: [workflows]
+    container_name: opencode-v2-hatchet
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${HATCHET_PORT:-8888}:8888
+      - 127.0.0.1:${HATCHET_GRPC_PORT:-7077}:7077
+    depends_on:
+      hatchet-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://hatchet:${HATCHET_DB_PASSWORD:-}@hatchet-postgres:5432/hatchet?sslmode=disable
+      SERVER_URL: https://${PUBLIC_HOST:-localhost}:${HATCHET_HTTPS_PORT:-4444}
+      SERVER_AUTH_COOKIE_DOMAIN: ${PUBLIC_HOST:-localhost}
+      SERVER_AUTH_COOKIE_INSECURE: "f"
+      SERVER_AUTH_SET_EMAIL_VERIFIED: "t"
+      SERVER_ALLOW_SIGNUP: "f"
+      ADMIN_EMAIL: ${HATCHET_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${HATCHET_ADMIN_PASSWORD:-}
+      SERVER_GRPC_BIND_ADDRESS: 0.0.0.0
+      SERVER_GRPC_INSECURE: "t"
+      SERVER_GRPC_PORT: "7077"
+      # workers run with host networking, so they reach the published port
+      SERVER_GRPC_BROADCAST_ADDRESS: 127.0.0.1:${HATCHET_GRPC_PORT:-7077}
+      SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: localhost:7077
+    volumes:
+      - hatchet-config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8733/live >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Push notifications for the phone (https://docs.ntfy.sh/config/).
+  ntfy:
+    image: binwiederhier/ntfy:v2.34.0
+    profiles: [workflows]
+    container_name: opencode-v2-ntfy
+    restart: unless-stopped
+    command: serve
+    ports:
+      - 127.0.0.1:${NTFY_PORT:-2586}:80
+    environment:
+      NTFY_BASE_URL: https://${PUBLIC_HOST:-localhost}:${NTFY_HTTPS_PORT:-4445}
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_ENABLE_LOGIN: "true"
+      # one admin (rw on every topic); the worker publishes with its token
+      NTFY_AUTH_USERS: ${NTFY_USER:-agent}:${NTFY_PASSWORD_HASH:-}:admin
+      NTFY_AUTH_TOKENS: ${NTFY_USER:-agent}:${NTFY_TOKEN:-}:workflow-worker
+    volumes:
+      - ntfy-data:/var/lib/ntfy
+
   # HTTPS in front of the server (browser/mobile). Starts with either profile.
   caddy:
     image: caddy:2
@@ -82,6 +192,10 @@ services:
     environment:
       HTTPS_PORT: ${HTTPS_PORT:-4443}
       PORT: ${PORT:-4096}
+      HATCHET_HTTPS_PORT: ${HATCHET_HTTPS_PORT:-4444}
+      HATCHET_PORT: ${HATCHET_PORT:-8888}
+      NTFY_HTTPS_PORT: ${NTFY_HTTPS_PORT:-4445}
+      NTFY_PORT: ${NTFY_PORT:-2586}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ${TLS_CERT:?set TLS_CERT in .env}:/certs/tls.crt:ro
@@ -90,3 +204,6 @@ services:
 
 volumes:
   caddy-data:
+  hatchet-postgres:
+  hatchet-config:
+  ntfy-data:

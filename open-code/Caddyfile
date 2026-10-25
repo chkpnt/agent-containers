@@ -11,3 +11,19 @@
 		flush_interval -1
 	}
 }
+
+# Hatchet dashboard (workflows profile)
+:{$HATCHET_HTTPS_PORT:4444} {
+	tls /certs/tls.crt /certs/tls.key
+	reverse_proxy 127.0.0.1:{$HATCHET_PORT:8888} {
+		flush_interval -1
+	}
+}
+
+# ntfy (workflows profile)
+:{$NTFY_HTTPS_PORT:4445} {
+	tls /certs/tls.crt /certs/tls.key
+	reverse_proxy 127.0.0.1:{$NTFY_PORT:2586} {
+		flush_interval -1
+	}
+}

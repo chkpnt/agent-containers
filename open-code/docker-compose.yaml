@@ -178,7 +178,9 @@ services:
       NTFY_AUTH_DEFAULT_ACCESS: deny-all
       NTFY_ENABLE_LOGIN: "true"
       # one admin (rw on every topic); the worker publishes with its token
-      NTFY_AUTH_USERS: ${NTFY_USER:-agent}:${NTFY_PASSWORD_HASH:-}:admin
+      NTFY_AUTH_USERS: ${NTFY_USER:-agent}:${NTFY_PASSWORD_HASH:-}:admin,${NTFY_PHONE_USER:-phone}:${NTFY_PHONE_PASSWORD_HASH:-}:user
+      # The phone user only reads the workflow topic; its password is easy to type on a phone.
+      NTFY_AUTH_ACCESS: ${NTFY_PHONE_USER:-phone}:${NTFY_TOPIC:-agent-workflows}:ro
       NTFY_AUTH_TOKENS: ${NTFY_USER:-agent}:${NTFY_TOKEN:-}:workflow-worker
     volumes:
       - ntfy-data:/var/lib/ntfy

@@ -236,7 +236,7 @@ Setup (once):
 ```bash
 # .env: COMPOSE_PROFILES=gpu,workflows, PUBLIC_HOST, HATCHET_DB_PASSWORD,
 #       HATCHET_ADMIN_PASSWORD, NTFY_* and WF_WORKER_DIR (see .env.example)
-docker run --rm -it binwiederhier/ntfy:v2.34.0 user hash   # -> NTFY_PASSWORD_HASH (single-quoted)
+docker run --rm -it binwiederhier/ntfy:v2.34.0 user hash   # -> NTFY_PASSWORD_HASH, run again for NTFY_PHONE_PASSWORD_HASH (single-quoted)
 echo "tk_$(openssl rand -hex 32 | head -c 29)"              # -> NTFY_TOKEN
 docker compose up -d hatchet-postgres hatchet-lite ntfy caddy
 # worker token -> HATCHET_CLIENT_TOKEN in .env
@@ -250,8 +250,9 @@ docker compose up -d opencode-gpu
 - Dashboard: log in with `HATCHET_ADMIN_EMAIL` / `HATCHET_ADMIN_PASSWORD`;
   signup is disabled. Tenant `Default`.
 - ntfy Android app: add server `https://<PUBLIC_HOST>:4445` with user
-  `NTFY_USER` / `NTFY_PASSWORD`, subscribe to `NTFY_TOPIC`. Anonymous access
-  is denied. The phone needs the issuing CA (same as for the web UI).
+  `NTFY_PHONE_USER` / `NTFY_PHONE_PASSWORD` (read-only on `NTFY_TOPIC`; the
+  admin `NTFY_USER` is for the worker), subscribe to `NTFY_TOPIC`. Anonymous
+  access is denied. The phone needs the issuing CA (same as for the web UI).
 - `WF_WORKER_DIR`: a checkout of the project that tracks `master` (e.g. a
   worktree `.worktrees/wf-worker`); update it and
   `docker compose restart workflow-worker` to deploy workflow changes.

@@ -4,6 +4,7 @@ ARG TARGETARCH
 # Single source of truth for apt-installed tooling. Override per-build with:
 #   docker build --build-arg LOCAL_TOOLS="..." -f base/Dockerfile base
 ARG LOCAL_TOOLS="git curl jq ripgrep vim nano make zip unzip ssh-client wget tree imagemagick ffmpeg ca-certificates gnupg procps build-essential python3 python3-pip redis-tools"
+ARG AUDIOWAVEFORM_VERSION=1.10.2
 
 # 1. Install System Dependencies (as root)
 RUN apt-get update && \
@@ -42,6 +43,23 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     else \
       npx playwright install-deps chromium; \
     fi
+
+# Install other tools for myself
+RUN echo 'deb https://deb.debian.org/debian trixie-backports main' \
+      > /etc/apt/sources.list.d/debian-backports.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+      -t trixie-backports \
+      yt-dlp \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /tmp/audiowaveform.deb \
+      "https://codeberg.org/chrisn/audiowaveform/releases/download/${AUDIOWAVEFORM_VERSION}/audiowaveform_${AUDIOWAVEFORM_VERSION}-1-13_amd64.deb" \
+  && apt-get update \
+  && apt-get install -y /tmp/audiowaveform.deb \
+  && rm -f /tmp/audiowaveform.deb \
+  && rm -rf /var/lib/apt/lists/*
+
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD_ARM64=1
 
